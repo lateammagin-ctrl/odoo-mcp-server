@@ -32,6 +32,10 @@ allowed = [
   "planning.slot", "planning.role", "planning.recurrency", "planning.shift.template",
   # Email Marketing (étendu)
   "mailing.mailing", "mailing.contact", "mailing.list", "mailing.trace",
+  # Marketing Automation — scénarios automatisés (Odoo 19 Enterprise).
+  # Claude assemble le scénario en brouillon ; le démarrage reste manuel
+  # (aucune action n'est autorisée ci-dessous, et `state` est gelé).
+  "marketing.campaign", "marketing.activity",
   # Social Marketing
   "social.account", "social.media", "social.post",
   "social.stream", "social.stream.post", "social.live.post",
@@ -59,6 +63,29 @@ allowed = [
   "mail.activity", "mail.activity.type", "mail.template",
   "product.category", "uom.uom", "res.partner.category",
 ]
+
+# Consultables, jamais modifiables. Toute création, écriture, suppression ou
+# action de workflow sur ces modèles est refusée par le serveur.
+readonly = [
+  # Résultats d'exécution d'un scénario marketing : ils sont produits par
+  # Odoo. On les lit pour juger une campagne, on ne les fabrique pas.
+  "marketing.participant", "marketing.trace",
+  # Nécessaires pour désigner la cible d'une campagne : model_id pointe sur
+  # ir.model, et enroll_unique_field_id sur ir.model.fields.
+  "ir.model", "ir.model.fields",
+  # Actions serveur : Claude peut en brancher une existante sur une étape de
+  # scénario, mais ne doit jamais en créer ni en modifier une — ce serait
+  # déposer du code exécutable en production.
+  "ir.actions.server",
+  # Filtres de segmentation favoris, réutilisables dans une campagne.
+  "mailing.filter",
+]
+
+# Champs dont l'écriture est refusée, modèle par modèle.
+[frozen_fields]
+# Passer une campagne en « running » déclenche de vrais envois en boucle, sans
+# repasser par un humain. Cette bascule se fait à la main dans Odoo.
+"marketing.campaign" = ["state"]
 
 [actions]
 "crm.lead"          = ["action_set_won", "action_set_lost", "action_schedule_meeting"]

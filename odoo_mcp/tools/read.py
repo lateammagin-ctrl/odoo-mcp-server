@@ -4,15 +4,23 @@ from odoo_mcp.tools import mcp_tool
 
 @mcp_tool
 def server_status() -> dict:
-    """Renvoie l'état de la connexion Odoo et la liste des modèles autorisés."""
+    """Renvoie l'état de la connexion Odoo, les modèles modifiables, ceux
+    consultables en lecture seule, et les champs gelés en écriture."""
     cfg = get_deps().config
-    return {"odoo_url": cfg.odoo_url, "allowed_models": cfg.allowed_models}
+    return {"odoo_url": cfg.odoo_url,
+            "allowed_models": cfg.allowed_models,
+            "readonly_models": cfg.readonly_models,
+            "frozen_fields": cfg.frozen_fields}
 
 
 @mcp_tool
 def list_models() -> list:
-    """Liste les modèles Odoo accessibles via ce serveur."""
-    return get_deps().config.allowed_models
+    """Liste les modèles Odoo accessibles via ce serveur, en lecture comme en
+    écriture. Certains sont en lecture seule : appelez server_status pour
+    savoir lesquels avant de tenter une création ou une modification."""
+    cfg = get_deps().config
+    return cfg.allowed_models + [m for m in cfg.readonly_models
+                                 if m not in cfg.allowed_models]
 
 
 @mcp_tool

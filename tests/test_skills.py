@@ -33,3 +33,17 @@ def test_get_skill_unknown_raises(tmp_path):
 
 def test_list_skills_missing_dir_returns_empty(tmp_path):
     assert list_skills(str(tmp_path / "absent")) == []
+
+
+def test_repo_ships_marketing_automation_skill():
+    """Le savoir-faire livré doit être lisible par le serveur (frontmatter
+    valide) et porter les points qui évitent les erreurs coûteuses."""
+    names = {s["name"]: s for s in list_skills("skills_library")}
+    assert "campagne-marketing-automation" in names
+    assert names["campagne-marketing-automation"]["description"]
+
+    content = get_skill("skills_library", "campagne-marketing-automation")
+    # Le piège principal : `domain` est calculé, c'est `activity_domain` qu'on écrit.
+    assert "activity_domain" in content
+    # La règle d'or doit être écrite noir sur blanc.
+    assert "Start" in content
