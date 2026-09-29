@@ -1,9 +1,15 @@
 ---
 name: campagne-marketing-automation
-description: Construire un scénario marketing automatisé sur mesure dans Odoo (marketing.campaign + marketing.activity) — modèle de données, procédure et pièges. Odoo 19 Enterprise.
+description: Construire un scénario marketing automatisé sur mesure dans Odoo (marketing.campaign + marketing.activity) — modèle de données, procédure et pièges. Vérifié sur la base magin en Odoo 19.0 Enterprise.
 ---
 
 # Construire un scénario Marketing Automation
+
+> **Noms de champs vérifiés le 2026-09-29 sur la base de production en Odoo
+> 19.0.** Odoo les a renommés après la 19.0 (`domain` → `enroll_domain`,
+> `unique_field_id` → `enroll_unique_field_id`). Après toute montée de version
+> d'Odoo, relance `inspect_model("marketing.campaign")` et
+> `inspect_model("marketing.activity")` avant de te fier à ce document.
 
 ## La règle d'or
 
@@ -20,12 +26,14 @@ campagne → **Start**.
 
 | Champ | Type | À savoir |
 |---|---|---|
-| `name` | char | Délégué à `utm.campaign` (`_inherits`). La campagne UTM est créée toute seule. |
+| `title` | char | **Obligatoire.** Le nom lisible de la campagne. Délégué à `utm.campaign` (`_inherits`) : la campagne UTM est créée toute seule. |
+| `name` | char | **Obligatoire.** « Campaign Identifier ». Mets la même valeur que `title` si tu n'as pas mieux. |
 | `model_id` | many2one `ir.model` | **Obligatoire.** La cible. Doit avoir `is_mail_thread = True`. |
-| `enroll_domain` | char | Le filtre d'inscription. **Une chaîne** contenant un domaine, pas une liste. |
-| `enroll_unique_field_id` | many2one `ir.model.fields` | Optionnel. Évite d'inscrire deux fois le même email. |
-| `state` | selection | `draft` / `running` / `stopped`. **Gelé en écriture.** |
-| `mailing_filter_ids` | many2many `mailing.filter` | Filtres favoris réutilisables. |
+| `domain` | char | Le filtre d'inscription. **Une chaîne** contenant un domaine, pas une liste. Attention : sur `marketing.activity`, un champ `domain` existe aussi mais il est calculé — voir plus bas. |
+| `unique_field_id` | many2one `ir.model.fields` | Optionnel. Évite d'inscrire deux fois le même email. |
+| `state` | selection | `draft` / `running` / `stopped`. **Gelé en écriture par le connecteur.** |
+| `mailing_filter_id` | many2one `mailing.filter` | Filtre favori réutilisable (un seul, pas une liste). |
+| `user_id`, `stage_id` | many2one | Obligatoires, mais Odoo les remplit par défaut. Ne les fournis pas sans raison. |
 
 ### `marketing.activity` — une étape
 
@@ -33,9 +41,11 @@ campagne → **Start**.
 |---|---|---|
 | `name` | char | Le libellé de l'étape. |
 | `campaign_id` | many2one | **Obligatoire.** |
-| `activity_type` | selection | `email` ou `action`. Pas de SMS (module non installé). |
+| `activity_type` | selection | `email`, `action` ou `whatsapp`. Pas de SMS (module non installé). |
 | `mass_mailing_id` | many2one `mailing.mailing` | Le mail envoyé, si `activity_type = "email"`. |
+| `whatsapp_template_id` | many2one `whatsapp.template` | Le modèle WhatsApp envoyé, si `activity_type = "whatsapp"`. |
 | `server_action_id` | many2one `ir.actions.server` | Si `activity_type = "action"`. **Lecture seule** : branche une action existante, n'en crée jamais. |
+| `source_id` | many2one `utm.source` | Obligatoire, mais rempli automatiquement à partir du `name`. Ne le fournis pas. |
 | `parent_id` | many2one `marketing.activity` | L'étape dont celle-ci dépend. Vide pour la première. |
 | `trigger_type` | selection | Voir ci-dessous. Défaut `begin`. |
 | `interval_number` + `interval_type` | int + selection | Le délai **après le déclencheur**. `hours` / `days` / `weeks` / `months`. |
@@ -44,12 +54,19 @@ campagne → **Start**.
 
 ### Les déclencheurs (`trigger_type`)
 
-`begin` (départ du scénario) · `activity` (le parent est exécuté) ·
-`mail_open` · `mail_not_open` · `mail_click` · `mail_not_click` ·
+**Structurels** : `begin` (départ du scénario) · `activity` (le parent est exécuté)
+
+**Email** : `mail_open` · `mail_not_open` · `mail_click` · `mail_not_click` ·
 `mail_reply` · `mail_not_reply` · `mail_bounce`
 
-Les déclencheurs `mail_*` n'ont de sens que si l'activité parente est de type
-`email`.
+**WhatsApp** : `whatsapp_read` · `whatsapp_not_read` · `whatsapp_click` ·
+`whatsapp_not_click` · `whatsapp_replied` · `whatsapp_not_replied` ·
+`whatsapp_bounced`
+
+Un déclencheur `mail_*` suppose une activité parente de type `email` ; un
+déclencheur `whatsapp_*` suppose un parent de type `whatsapp`. On peut mélanger
+les canaux dans un même scénario : un mail non ouvert peut enchaîner sur un
+message WhatsApp.
 
 ## Procédure
 
@@ -64,9 +81,10 @@ Les déclencheurs `mail_*` n'ont de sens que si l'activité parente est de type
 3. **Crée la campagne** :
    ```
    create("marketing.campaign", {
+     "title": "Bienvenue abonnés",
      "name": "Bienvenue abonnés",
      "model_id": 512,
-     "enroll_domain": "[('list_ids', 'in', [3])]"
+     "domain": "[('list_ids', 'in', [3])]"
    })
    ```
 
@@ -110,13 +128,20 @@ Les déclencheurs `mail_*` n'ont de sens que si l'activité parente est de type
 
 7. **Passe la main.** Rappelle : écrire le contenu des mails, puis **Start**
    dans Odoo. Précise le nombre de destinataires attendus
-   (`count` sur le modèle cible avec le `enroll_domain`) — c'est le chiffre qui
-   fait réfléchir avant de lancer.
+   (`count` sur le modèle cible avec le `domain` de la campagne) — c'est le
+   chiffre qui fait réfléchir avant de lancer.
 
 ## Pièges
 
-- **`domain` vs `activity_domain`** : `domain` est calculé, toute écriture est
-  perdue ou refusée. Écris `activity_domain`.
+- **Le champ `domain` n'a pas le même statut selon le modèle.** Sur
+  `marketing.campaign`, c'est le filtre d'inscription et il **s'écrit**. Sur
+  `marketing.activity`, il est **calculé** (il combine le filtre de l'étape et
+  celui hérité du parent) : toute écriture y est perdue. Sur une activité, le
+  champ à écrire est `activity_domain`.
+- **Pas de SMS, mais WhatsApp est disponible.** Si le besoin est « relancer
+  ceux qui n'ont pas ouvert », un message WhatsApp est souvent plus efficace
+  qu'un second mail. Les modèles WhatsApp existants se lisent dans
+  `whatsapp.template`.
 - **Les domaines sont des chaînes**, pas des listes JSON : `"[('x', '=', 1)]"`.
 - **Crée `activity_type` dans le même appel** que `mass_mailing_id` ou
   `server_action_id`. Ces deux champs sont calculés et se vident tout seuls si
