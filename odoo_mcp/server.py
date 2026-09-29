@@ -31,7 +31,9 @@ def build_app():
     runtime.deps = runtime.Deps(
         config=cfg,
         odoo=OdooClient(cfg.odoo_url, cfg.odoo_db, cfg.odoo_username,
-                        cfg.odoo_api_key, cfg.allowed_models),
+                        cfg.odoo_api_key, cfg.allowed_models,
+                        readonly_models=cfg.readonly_models,
+                        frozen_fields=cfg.frozen_fields),
     )
 
     mcp = FastMCP("Odoo MCP — magin")

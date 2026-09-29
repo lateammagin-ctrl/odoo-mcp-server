@@ -7,6 +7,18 @@ def make_client():
                       allowed_models=["crm.lead", "res.partner"])
 
 
+def make_marketing_client():
+    """Client configuré comme en production pour le pack marketing :
+    marketing.campaign modifiable mais `state` gelé, ir.actions.server
+    consultable seulement."""
+    return OdooClient(
+        "https://x.odoo.com/", "db", "user", "key",
+        allowed_models=["marketing.campaign", "marketing.activity"],
+        readonly_models=["ir.actions.server", "ir.model"],
+        frozen_fields={"marketing.campaign": ["state"]},
+    )
+
+
 def test_check_model_rejects_unlisted():
     client = make_client()
     with pytest.raises(OdooError) as exc:
@@ -67,6 +79,69 @@ def test_write_methods_delegate(monkeypatch):
     assert seen[0] == ("crm.lead", "create", [{"name": "ACME"}])
     assert seen[1] == ("crm.lead", "write", [[5], {"name": "ACME2"}])
     assert seen[2] == ("crm.lead", "unlink", [[5]])
+
+
+def test_readonly_model_allows_reading(monkeypatch):
+    client = make_marketing_client()
+    monkeypatch.setattr(client, "_ensure_uid", lambda: 2)
+
+    class FakeModels:
+        def execute_kw(self, db, uid, key, model, method, args, kwargs):
+            return [{"id": 3, "name": "Créer une tâche"}]
+
+    client._models = FakeModels()
+    assert client.search("ir.actions.server", fields=["name"]) == [
+        {"id": 3, "name": "Créer une tâche"}]
+    assert client.fields("ir.model")  # fields_get compte comme une lecture
+
+
+def test_readonly_model_refuses_every_write():
+    client = make_marketing_client()
+    for call in (
+        lambda: client.create("ir.actions.server", {"name": "x"}),
+        lambda: client.write("ir.actions.server", [1], {"name": "x"}),
+        lambda: client.unlink("ir.actions.server", [1]),
+        # Une action de workflow est elle aussi une écriture : le refus par
+        # défaut sur les méthodes inconnues doit l'attraper.
+        lambda: client.call_action("ir.actions.server", [1], "run"),
+    ):
+        with pytest.raises(OdooError) as exc:
+            call()
+        assert "lecture seule" in str(exc.value)
+
+
+def test_unlisted_model_still_refused_and_lists_both_sets():
+    client = make_marketing_client()
+    with pytest.raises(OdooError) as exc:
+        client.search("res.users")
+    message = str(exc.value)
+    assert "non autorisé" in message
+    # Le message d'aide énumère les modèles des deux listes.
+    assert "marketing.campaign" in message and "ir.model" in message
+
+
+def test_frozen_field_refused_on_write_and_create():
+    client = make_marketing_client()
+    with pytest.raises(OdooError) as exc:
+        client.write("marketing.campaign", [1], {"state": "running"})
+    assert "state" in str(exc.value)
+    # Interdit aussi de naître directement en « running ».
+    with pytest.raises(OdooError):
+        client.create("marketing.campaign", {"name": "X", "state": "running"})
+
+
+def test_frozen_field_lets_other_fields_through(monkeypatch):
+    client = make_marketing_client()
+    seen = []
+    monkeypatch.setattr(client, "execute_kw",
+                        lambda m, meth, a, k=None: seen.append((m, meth, a)) or 12)
+
+    client.write("marketing.campaign", [1], {"enroll_domain": "[]"})
+    client.create("marketing.activity", {"name": "Relance",
+                                         "trigger_type": "mail_not_open"})
+
+    assert seen[0] == ("marketing.campaign", "write", [[1], {"enroll_domain": "[]"}])
+    assert seen[1][1] == "create"
 
 
 def test_action_message_email_delegate(monkeypatch):

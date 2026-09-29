@@ -5,18 +5,31 @@ class OdooError(Exception):
     pass
 
 
+# Seules ces méthodes comptent comme de la lecture. Tout le reste — y compris
+# les actions de workflow appelées par leur nom — est traité comme une
+# écriture. Refus par défaut : une méthode ajoutée demain sera considérée
+# comme dangereuse tant qu'elle n'est pas inscrite ici explicitement.
+_READ_METHODS = frozenset({
+    "search_read", "read", "fields_get", "search_count", "read_group",
+})
+
+
 def _clean_fault(fault_string):
     lines = [l for l in (fault_string or "").splitlines() if l.strip()]
     return lines[-1].strip() if lines else "Erreur Odoo inconnue"
 
 
 class OdooClient:
-    def __init__(self, url, db, username, api_key, allowed_models):
+    def __init__(self, url, db, username, api_key, allowed_models,
+                 readonly_models=None, frozen_fields=None):
         self.url = url.rstrip("/")
         self.db = db
         self.username = username
         self.api_key = api_key
         self.allowed_models = set(allowed_models)
+        self.readonly_models = set(readonly_models or ())
+        self.frozen_fields = {model: set(fields)
+                              for model, fields in (frozen_fields or {}).items()}
         self._uid = None
         self._common = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/common")
         self._models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
@@ -34,15 +47,39 @@ class OdooClient:
             self._uid = uid
         return self._uid
 
-    def _check_model(self, model):
-        if model not in self.allowed_models:
+    def _check_model(self, model, write):
+        if model in self.allowed_models:
+            return
+        if model in self.readonly_models:
+            if not write:
+                return
             raise OdooError(
-                f"Modèle '{model}' non autorisé. Modèles autorisés : "
-                + ", ".join(sorted(self.allowed_models))
+                f"Modèle '{model}' accessible en lecture seule : création, "
+                f"modification, suppression et actions y sont refusées. "
+                f"Faites la modification à la main dans Odoo."
+            )
+        raise OdooError(
+            f"Modèle '{model}' non autorisé. Modèles autorisés : "
+            + ", ".join(sorted(self.allowed_models | self.readonly_models))
+        )
+
+    def _check_frozen_fields(self, model, values):
+        """Refuse l'écriture des champs gelés : ceux dont la modification a des
+        effets qu'on ne peut pas rattraper (ex. faire passer une campagne
+        marketing en « running », ce qui déclenche de vrais envois)."""
+        frozen = self.frozen_fields.get(model)
+        if not frozen or not isinstance(values, dict):
+            return
+        touched = sorted(frozen & set(values))
+        if touched:
+            raise OdooError(
+                f"Champ(s) {', '.join(touched)} de '{model}' non modifiable(s) "
+                f"via le connecteur : cette bascule a des effets irréversibles "
+                f"et se fait à la main dans Odoo."
             )
 
     def execute_kw(self, model, method, args, kwargs=None):
-        self._check_model(model)
+        self._check_model(model, write=method not in _READ_METHODS)
         uid = self._ensure_uid()
         attempts = 0
         while True:
@@ -82,9 +119,11 @@ class OdooClient:
         return self.execute_kw(model, "read_group", [domain or [], fields, groupby])
 
     def create(self, model, values):
+        self._check_frozen_fields(model, values)
         return self.execute_kw(model, "create", [values])
 
     def write(self, model, ids, values):
+        self._check_frozen_fields(model, values)
         return self.execute_kw(model, "write", [list(ids), values])
 
     def unlink(self, model, ids):

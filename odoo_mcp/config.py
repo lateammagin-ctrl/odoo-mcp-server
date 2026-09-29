@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,6 +24,12 @@ class Config:
     mass_op_cap: int
     audit_log_path: str
     skills_dir: str
+    # Modèles consultables mais jamais modifiables (création, écriture,
+    # suppression et actions de workflow refusées).
+    readonly_models: list = field(default_factory=list)
+    # Champs dont l'écriture est refusée, par modèle. Sert à interdire les
+    # bascules aux effets irréversibles (ex. lancer une campagne marketing).
+    frozen_fields: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, toml_path="config.toml", env_path=".env"):
@@ -45,7 +51,10 @@ class Config:
             odoo_api_key=os.environ["ODOO_API_KEY"],
             access_secret=os.environ["MCP_ACCESS_SECRET"],
             allowed_models=list(data.get("models", {}).get("allowed", [])),
+            readonly_models=list(data.get("models", {}).get("readonly", [])),
             allowed_actions={k: list(v) for k, v in data.get("actions", {}).items()},
+            frozen_fields={k: list(v)
+                           for k, v in data.get("frozen_fields", {}).items()},
             mass_op_cap=int(guardrails.get("mass_op_cap", 50)),
             audit_log_path=guardrails.get("audit_log_path", "audit.log"),
             skills_dir=data.get("skills", {}).get("dir", "skills_library"),
