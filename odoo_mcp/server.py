@@ -5,7 +5,7 @@ from odoo_mcp.auth import extract_bearer, verify_secret
 from odoo_mcp.config import Config
 from odoo_mcp.odoo_client import OdooClient
 from odoo_mcp.tools import all_tools
-from odoo_mcp.tools import actions, read, write  # noqa: F401  (enregistre les outils)
+from odoo_mcp.tools import actions, followup, read, write  # noqa: F401  (enregistre les outils)
 
 
 def is_authorized(authorization_header, query_secret, expected_secret):

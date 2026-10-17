@@ -1,3 +1,4 @@
+import urllib.request
 import xmlrpc.client
 
 
@@ -146,3 +147,37 @@ class OdooClient:
             "message_type": "comment",
             "subtype_xmlid": "mail.mt_comment",
         })
+
+    def send_mail_template(self, template_id, res_id, email_values=None):
+        """Envoie un email à partir d'un modèle Odoo (mail.template) rendu sur
+        le record `res_id`. Le rendu et l'envoi se font entièrement côté Odoo.
+        Renvoie l'id du mail.mail créé."""
+        return self.execute_kw("mail.template", "send_mail", [[template_id]], {
+            "res_id": res_id,
+            "force_send": True,
+            "email_values": email_values or {},
+        })
+
+    def fetch_invoice_pdf(self, move_id):
+        """Fait générer par Odoo le PDF d'une facture et renvoie ses octets.
+        Passe par le lien portail de la facture (jeton d'accès créé au besoin
+        par Odoo), ce qui évite toute session web : la clé API suffit."""
+        path = self.execute_kw("account.move", "get_portal_url", [[move_id]], {
+            "report_type": "pdf",
+            "download": True,
+        })
+        if not path:
+            raise OdooError(f"Lien portail introuvable pour la facture {move_id}.")
+        url = path if path.startswith("http") else f"{self.url}{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                content = resp.read()
+                ctype = resp.headers.get("Content-Type", "")
+        except OSError as exc:
+            raise OdooError(f"Téléchargement du PDF impossible : {exc}") from exc
+        if "pdf" not in ctype.lower() and not content.startswith(b"%PDF"):
+            raise OdooError(
+                f"Odoo n'a pas renvoyé de PDF pour la facture {move_id} "
+                f"(type reçu : {ctype or 'inconnu'})."
+            )
+        return content

@@ -72,9 +72,14 @@ def get_attachments(model: str, record_id: int) -> list:
     """Liste les pièces jointes d'un record et renvoie leur contenu (base64).
     Permet de récupérer les PDF générés par Odoo (factures, etc.)."""
     deps = get_deps()
+    # Odoo masque par défaut les pièces jointes rattachées à un champ binaire
+    # (res_field renseigné), dont le PDF officiel d'une facture
+    # (invoice_pdf_report_id). Le OR explicite sur res_field les inclut.
     return deps.odoo.search("ir.attachment",
                             domain=[["res_model", "=", model],
-                                    ["res_id", "=", record_id]],
+                                    ["res_id", "=", record_id],
+                                    "|", ["res_field", "=", False],
+                                    ["res_field", "!=", False]],
                             fields=["name", "mimetype", "datas"])
 
 
